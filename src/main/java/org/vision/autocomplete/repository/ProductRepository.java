@@ -14,9 +14,6 @@ import java.util.List;
 @Repository
 public interface ProductRepository extends JpaRepository<Product, Long> {
 
-    // Using LIKE operator with case insensitivity
-    @Query("SELECT p FROM Product p WHERE LOWER(p.name) LIKE LOWER(CONCAT('%', :keyword, '%'))")
-    List<Product> findByNameContainingIgnoreCase(@Param("keyword") String keyword);
 
     // Alternative using method name convention
     List<Product> findByNameContainingIgnoreCaseAlt(String name);
