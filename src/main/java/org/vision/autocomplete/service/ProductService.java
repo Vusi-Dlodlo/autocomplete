@@ -21,11 +21,11 @@ public class ProductService {
         this.productRepository = productRepository;
     }
 
-    public List<Product> searchProducts(String keyword) {
+    public List<Product> searchProductsByName(String keyword) {
         if (keyword == null || keyword.trim().isEmpty()) {
-            return Collections.emptyList();
+            return productRepository.findAll();
         }
-        return productRepository.searchByKeyword(keyword.trim());
+        return productRepository.findByNameContainingIgnoreCase(keyword.trim());
     }
 
     public List<Product> searchProductsPaginated(String keyword, int page, int size) {

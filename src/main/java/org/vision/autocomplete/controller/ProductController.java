@@ -12,35 +12,25 @@ import java.util.List;
 @RequestMapping("/api/products")
 public class ProductController {
 
-    private final ProductService productService;
-
     @Autowired
     public ProductController(ProductService productService) {
         this.productService = productService;
     }
 
+    @Autowired
+    private ProductService productService;
+
+    // Search products by name
     @GetMapping("/search")
-    public ResponseEntity<List<Product>> searchProducts(
-            @RequestParam String keyword,
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "10") int size) {
-
-        List<Product> products;
-
-        if (page > 0 || size != 10) {
-            // Use paginated search if pagination parameters are provided
-            products = productService.searchProductsPaginated(keyword, page, size);
-        } else {
-            // Use regular search otherwise
-            products = productService.searchProducts(keyword);
-        }
-
-        return ResponseEntity.ok(products);
+    public List<Product> searchProducts(@RequestParam String keyword) {
+        return productService.searchProductsByName(keyword);
     }
 
+    // Get product by ID
     @GetMapping("/{id}")
     public ResponseEntity<Product> getProductById(@PathVariable Long id) {
         Product product = productService.getProductById(id);
         return ResponseEntity.ok(product);
     }
+
 }

@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Product Search</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"
+          integrity="sha512-dXn2b4YMHuAOk8zBGILrlIY0pVvPhbdm/dzDNP4Rz6Mq9Ycezhy8QRT15jZ3EZ4yq9UhA6T9oXbyW/vdeWUwNw=="
+          crossorigin="anonymous" referrerpolicy="no-referrer"/>
+    <style>
+        :root {
+            --primary-color: #3b82f6;
+            --primary-dark: #2563eb;
+            --text-dark: #1f2937;
+            --text-light: #6b7280;
+            --bg-light: #f9fafb;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Poppins', sans-serif;
+            background-color: #f3f4f6;
+            color: var(--text-dark);
+            line-height: 1.6;
+            padding: 2rem;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            font-size: 1.75rem;
+            margin-bottom: 1.5rem;
+            color: var(--primary-dark);
+        }
+
+        .card {
+            background-color: white;
+            border-radius: 0.5rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .search-section {
+            margin-bottom: 2rem;
+        }
+
+        .search-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+        }
+
+        .search-container {
+            position: relative;
+            margin-bottom: 1rem;
+        }
+
+        .search-input-wrapper {
+            position: relative;
+        }
+
+        .search-icon {
+            position: absolute;
+            left: 0.75rem;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--text-light);
+        }
+
+        .search-input {
+            width: 100%;
+            padding: 0.75rem 1rem;
+            padding-left: 2.5rem;
+            border: 1px solid #d1d5db;
+            border-radius: 0.5rem;
+            font-size: 1rem;
+            transition: all 0.3s ease;
+        }
+
+        .search-input:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25);
+        }
+
+        .spinner {
+            position: absolute;
+            right: 0.75rem;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--primary-color);
+        }
+
+        .autocomplete-results {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            max-height: 300px;
+            overflow-y: auto;
+            background-color: white;
+            border: 1px solid #d1d5db;
+            border-top: none;
+            border-radius: 0 0 0.5rem 0.5rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            z-index: 10;
+        }
+
+        .autocomplete-item {
+            padding: 0.75rem 1rem;
+            cursor: pointer;
+            border-bottom: 1px solid #e5e7eb;
+            transition: background-color 0.2s ease;
+        }
+
+        .autocomplete-item:last-child {
+            border-bottom: none;
+        }
+
+        .autocomplete-item:hover {
+            background-color: #f3f4f6;
+        }
+
+        .autocomplete-item-name {
+            font-weight: 500;
+            color: var(--text-dark);
+        }
+
+        .autocomplete-item-details {
+            font-size: 0.875rem;
+            color: var(--text-light);
+            display: flex;
+            justify-content: space-between;
+            margin-top: 0.25rem;
+        }
+
+        .highlight {
+            font-weight: 600;
+            color: var(--primary-color);
+        }
+
+        .selected-product {
+            background-color: var(--bg-light);
+            border-radius: 0.5rem;
+            padding: 1rem;
+            margin-top: 1rem;
+        }
+
+        .selected-product-title {
+            font-size: 1rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
+
+        .product-field {
+            margin-bottom: 0.75rem;
+        }
+
+        .field-label {
+            font-size: 0.75rem;
+            font-weight: 500;
+            color: var(--text-light);
+            margin-bottom: 0.25rem;
+        }
+
+        .field-value {
+            font-size: 0.875rem;
+            color: var(--text-dark);
+            padding: 0.5rem;
+            background-color: white;
+            border: 1px solid #e5e7eb;
+            border-radius: 0.25rem;
+        }
+
+        .thymeleaf-inputs {
+            margin-top: 2rem;
+            border-top: 1px solid #e5e7eb;
+            padding-top: 1.5rem;
+        }
+
+        .thymeleaf-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+        }
+
+        .input-group {
+            margin-bottom: 1rem;
+        }
+
+        .input-label {
+            display: block;
+            font-size: 0.875rem;
+            font-weight: 500;
+            margin-bottom: 0.5rem;
+        }
+
+        .input-field {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid #d1d5db;
+            border-radius: 0.5rem;
+            font-size: 0.875rem;
+        }
+
+        .code-block {
+            background-color: #1f2937;
+            color: white;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            font-family: monospace;
+            font-size: 0.875rem;
+            overflow-x: auto;
+            margin-top: 1.5rem;
+        }
+
+        .code-comment {
+            color: #9ca3af;
+        }
+
+        .show-all-btn {
+            display: block;
+            width: 100%;
+            padding: 0.75rem;
+            background-color: #f3f4f6;
+            border: 1px dashed #d1d5db;
+            border-radius: 0.5rem;
+            text-align: center;
+            color: var(--text-light);
+            font-size: 0.875rem;
+            cursor: pointer;
+            margin-top: 0.5rem;
+            transition: all 0.2s ease;
+        }
+
+        .show-all-btn:hover {
+            background-color: #e5e7eb;
+            color: var(--text-dark);
+        }
+
+        .no-results {
+            padding: 1rem;
+            text-align: center;
+            color: var(--text-light);
+            font-size: 0.875rem;
+        }
+    </style>
+</head>
+<body>
+<div class="card">
+    <div class="search-section">
+        <h2 class="search-title">Search Products</h2>
+        <div class="search-container">
+            <div class="search-input-wrapper">
+                <i class="fas fa-search search-icon"></i>
+                <input
+                        type="text"
+                        id="productSearch"
+                        class="search-input"
+                        placeholder="Start typing to search products..."
+                        autocomplete="off"
+                >
+                <div id="searchSpinner" class="spinner" style="display: none;">
+                    <i class="fas fa-spinner fa-spin"></i>
+                </div>
+            </div>
+            <div id="searchResults" class="autocomplete-results" style="display: none;"></div>
+            <button id="showAllBtn" class="show-all-btn" style="display: none;">
+                <i class="fas fa-list-ul"></i> Show all products
+            </button>
+        </div>
+    </div>
+
+    <div id="selectedProduct" class="selected-product" style="display: none;">
+        <h3 class="selected-product-title">Selected Product</h3>
+
+        <div class="product-field">
+            <div class="field-label">Product ID</div>
+            <div id="productId" class="field-value"></div>
+        </div>
+
+        <div class="product-field">
+            <div class="field-label">Name</div>
+            <div id="productName" class="field-value"></div>
+        </div>
+
+        <div class="product-field">
+            <div class="field-label">Category</div>
+            <div id="productCategory" class="field-value"></div>
+        </div>
+
+        <div class="product-field">
+            <div class="field-label">Price</div>
+            <div id="productPrice" class="field-value"></div>
+        </div>
+
+        <div class="product-field">
+            <div class="field-label">Description</div>
+            <div id="productDescription" class="field-value"></div>
+        </div>
+    </div>
+
+    <!-- Thymeleaf Hidden Inputs -->
+    <div class="thymeleaf-inputs">
+        <h3 class="thymeleaf-title">Thymeleaf Input Values</h3>
+        <p>These inputs would be used in your Thymeleaf template to store the selected values:</p>
+
+        <div class="input-group">
+            <label for="productIdInput" class="input-label">Product ID (hidden input)</label>
+            <input
+                    type="text"
+                    id="productIdInput"
+                    name="productId"
+                    class="input-field"
+                    th:value="${productId}"
+                    readonly
+            >
+        </div>
+
+        <div class="input-group">
+            <label for="productNameInput" class="input-label">Product Name</label>
+            <input
+                    type="text"
+                    id="productNameInput"
+                    name="productName"
+                    class="input-field"
+                    th:value="${productName}"
+                    readonly
+            >
+        </div>
+
+        <div class="input-group">
+            <label for="productCategoryInput" class="input-label">Category</label>
+            <input
+                    type="text"
+                    id="productCategoryInput"
+                    name="productCategory"
+                    class="input-field"
+                    th:value="${productCategory}"
+                    readonly
+            >
+        </div>
+    </div>
+</div>
+</div>
+
+<script src='autocomplete.js'></script>
+</body>
+</html>

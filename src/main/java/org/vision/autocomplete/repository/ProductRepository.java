@@ -16,7 +16,10 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
 
 
     // Alternative using method name convention
-    List<Product> findByNameContainingIgnoreCaseAlt(String name);
+    List<Product> findByNameContainingIgnoreCase(String name);
+    // Find products where name contains the keyword (case insensitive)
+    @Query("SELECT p FROM Product p WHERE LOWER(p.name) LIKE LOWER(CONCAT('%', :keyword, '%'))")
+    List<Product> getAllProductsDetails(@Param("keyword") String keyword);
 
     // Search in multiple fields
     @Query("SELECT p FROM Product p WHERE " +
