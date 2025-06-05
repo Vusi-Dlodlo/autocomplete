@@ -1,0 +1,1533 @@
+/*******************************************************
+ * VERSION 1: INITIAL WORKITEM SEARCH WITH AUTOCOMPLETE
+ *******************************************************/
+
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WorkItem Search</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .autocomplete-container {
+            position: relative;
+        }
+        .autocomplete-results {
+            position: absolute;
+            z-index: 1000;
+            width: 100%;
+            max-height: 300px;
+            overflow-y: auto;
+            display: none;
+            background-color: white;
+        }
+        .autocomplete-item {
+            cursor: pointer;
+            padding: 8px 12px;
+        }
+        .autocomplete-item:hover {
+            background-color: #f8f9fa;
+        }
+        .similar-results-modal .modal-body {
+            max-height: 500px;
+            overflow-y: auto;
+        }
+        .search-spinner {
+            position: absolute;
+            right: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            z-index: 5;
+            display: none;
+        }
+        .search-input-container {
+            position: relative;
+        }
+    </style>
+</head>
+<body>
+    <div class="container mt-4">
+        <!-- This is your existing form with Thymeleaf fields -->
+        <form th:object="${workItem}" method="post" id="workItemForm">
+            <!-- Hidden ID field -->
+            <input type="hidden" th:field="*{id}" id="workItemId">
+            
+            <div class="row mb-3">
+                <div class="col-md-6">
+                    <label for="name" class="form-label">Name</label>
+                    <input type="text" class="form-control" th:field="*{name}" id="name">
+                </div>
+                <div class="col-md-6">
+                    <label for="email" class="form-label">Email</label>
+                    <input type="email" class="form-control" th:field="*{email}" id="email">
+                </div>
+            </div>
+            
+            <div class="row mb-3">
+                <div class="col-md-6">
+                    <label for="version" class="form-label">Version</label>
+                    <input type="text" class="form-control" th:field="*{version}" id="version">
+                </div>
+                <div class="col-md-6">
+                    <label for="owner" class="form-label">Owner</label>
+                    <input type="text" class="form-control" th:field="*{owner}" id="owner">
+                </div>
+            </div>
+            
+            <div class="mb-3">
+                <label for="desc" class="form-label">Description</label>
+                <textarea class="form-control" th:field="*{desc}" id="desc" rows="3"></textarea>
+            </div>
+            
+            <!-- Other form fields would go here -->
+            
+            <!-- Search component to find and populate WorkItem -->
+            <div class="card mb-3">
+                <div class="card-header">
+                    Search for WorkItem
+                </div>
+                <div class="card-body">
+                    <div class="input-group">
+                        <div class="autocomplete-container flex-grow-1">
+                            <div class="search-input-container">
+                                <input type="text" id="workItemSearch" class="form-control" placeholder="Search for a WorkItem by name...">
+                                <div class="search-spinner">
+                                    <div class="spinner-border spinner-border-sm text-primary" role="status">
+                                        <span class="visually-hidden">Loading...</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="autocomplete-results list-group shadow-sm border" id="autocompleteResults"></div>
+                        </div>
+                        <button class="btn btn-outline-secondary" type="button" id="findSimilarBtn" disabled>
+                            <i class="bi bi-search"></i> Find Similar
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <button type="submit" class="btn btn-primary">Save</button>
+        </form>
+    </div>
+
+    <!-- Similar Results Modal -->
+    <div class="modal fade similar-results-modal" id="similarResultsModal" tabindex="-1" aria-labelledby="similarResultsModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="similarResultsModalLabel">Similar WorkItems</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="list-group" id="similarResultsList">
+                        <!-- Similar results will be populated here -->
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const searchInput = document.getElementById('workItemSearch');
+            const autocompleteResults = document.getElementById('autocompleteResults');
+            const findSimilarBtn = document.getElementById('findSimilarBtn');
+            const similarResultsModal = new bootstrap.Modal(document.getElementById('similarResultsModal'));
+            const similarResultsList = document.getElementById('similarResultsList');
+            const searchSpinner = document.querySelector('.search-spinner');
+            
+            let searchTimeout;
+            let lastSearchTerm = '';
+            let isSearching = false;
+            
+            // Search input event handler
+            searchInput.addEventListener('input', function() {
+                const searchTerm = this.value.trim();
+                lastSearchTerm = searchTerm;
+                
+                // Enable/disable the find similar button
+                findSimilarBtn.disabled = searchTerm.length < 1;
+                
+                // Clear previous timeout
+                clearTimeout(searchTimeout);
+                
+                // Hide results if search term is empty
+                if (searchTerm.length < 1) {
+                    autocompleteResults.style.display = 'none';
+                    searchSpinner.style.display = 'none';
+                    return;
+                }
+                
+                // Show spinner immediately
+                searchSpinner.style.display = 'block';
+                isSearching = true;
+                
+                // Set timeout for search to avoid too many requests (small debounce)
+                searchTimeout = setTimeout(() => {
+                    fetchAutocompleteResults(searchTerm);
+                }, 150);
+            });
+            
+            // Find similar button click handler
+            findSimilarBtn.addEventListener('click', function() {
+                const searchTerm = searchInput.value.trim();
+                if (searchTerm.length >= 1) {
+                    // Show spinner
+                    searchSpinner.style.display = 'block';
+                    isSearching = true;
+                    
+                    fetchSimilarResults(searchTerm);
+                }
+            });
+            
+            // Close autocomplete results when clicking outside
+            document.addEventListener('click', function(e) {
+                if (!searchInput.contains(e.target) && !autocompleteResults.contains(e.target)) {
+                    autocompleteResults.style.display = 'none';
+                }
+            });
+            
+            // Fetch autocomplete results
+            function fetchAutocompleteResults(searchTerm) {
+                // In a real application, this would be an AJAX call to your Spring Boot backend
+                // For this prototype, we'll simulate the response
+                
+                // Example AJAX call (commented out):
+                /*
+                fetch(`/api/workitems/autocomplete?term=${encodeURIComponent(searchTerm)}`)
+                    .then(response => response.json())
+                    .then(data => {
+                        displayAutocompleteResults(data, searchTerm);
+                        searchSpinner.style.display = 'none';
+                        isSearching = false;
+                    })
+                    .catch(error => {
+                        console.error('Error fetching autocomplete results:', error);
+                        searchSpinner.style.display = 'none';
+                        isSearching = false;
+                    });
+                */
+                
+                // Simulate AJAX response with sample data
+                setTimeout(() => {
+                    const sampleData = [
+                        { id: 1, name: "Project Alpha", email: "alpha@example.com", version: "1.0.0", desc: "Main project for client A", owner: "John Doe" },
+                        { id: 2, name: "Project Beta", email: "beta@example.com", version: "2.1.5", desc: "Secondary project for client B", owner: "Jane Smith" },
+                        { id: 3, name: "Alpha Testing", email: "testing@example.com", version: "0.9.1", desc: "Testing phase for Project Alpha", owner: "Mike Johnson" }
+                    ].filter(item => item.name.toLowerCase().includes(searchTerm.toLowerCase()));
+                    
+                    displayAutocompleteResults(sampleData, searchTerm);
+                    searchSpinner.style.display = 'none';
+                    isSearching = false;
+                }, 300); // Simulate network delay
+            }
+            
+            // Display autocomplete results with highlighting
+            function displayAutocompleteResults(results, searchTerm) {
+                autocompleteResults.innerHTML = '';
+                
+                if (results.length === 0) {
+                    autocompleteResults.style.display = 'none';
+                    return;
+                }
+                
+                results.forEach(item => {
+                    const resultItem = document.createElement('a');
+                    resultItem.className = 'list-group-item list-group-item-action autocomplete-item';
+                    
+                    // Highlight matching characters in name
+                    const highlightedName = highlightMatches(item.name, searchTerm);
+                    
+                    resultItem.innerHTML = `${highlightedName} <small class="text-muted">(${item.version})</small>`;
+                    resultItem.addEventListener('click', () => {
+                        populateFormWithWorkItem(item);
+                        autocompleteResults.style.display = 'none';
+                    });
+                    autocompleteResults.appendChild(resultItem);
+                });
+                
+                autocompleteResults.style.display = 'block';
+            }
+            
+            // Fetch similar results for modal
+            function fetchSimilarResults(searchTerm) {
+                // In a real application, this would be an AJAX call to your Spring Boot backend
+                // For this prototype, we'll simulate the response
+                
+                // Example AJAX call (commented out):
+                /*
+                fetch(`/api/workitems/similar?term=${encodeURIComponent(searchTerm)}`)
+                    .then(response => response.json())
+                    .then(data => {
+                        displaySimilarResults(data, searchTerm);
+                        searchSpinner.style.display = 'none';
+                        isSearching = false;
+                    })
+                    .catch(error => {
+                        console.error('Error fetching similar results:', error);
+                        searchSpinner.style.display = 'none';
+                        isSearching = false;
+                    });
+                */
+                
+                // Simulate AJAX response with sample data
+                setTimeout(() => {
+                    const sampleData = [
+                        { id: 1, name: "Project Alpha", email: "alpha@example.com", version: "1.0.0", desc: "Main project for client A", owner: "John Doe" },
+                        { id: 2, name: "Project Beta", email: "beta@example.com", version: "2.1.5", desc: "Secondary project for client B", owner: "Jane Smith" },
+                        { id: 3, name: "Alpha Testing", email: "testing@example.com", version: "0.9.1", desc: "Testing phase for Project Alpha", owner: "Mike Johnson" },
+                        { id: 4, name: "Project Gamma", email: "gamma@example.com", version: "0.5.0", desc: "Experimental project", owner: "Sarah Williams" },
+                        { id: 5, name: "Alpha Prototype", email: "prototype@example.com", version: "0.1.2", desc: "Initial prototype for Project Alpha", owner: "David Brown" }
+                    ].filter(item => {
+                        const searchLower = searchTerm.toLowerCase();
+                        return item.name.toLowerCase().includes(searchLower) || 
+                               item.desc.toLowerCase().includes(searchLower) ||
+                               item.email.toLowerCase().includes(searchLower) ||
+                               item.owner.toLowerCase().includes(searchLower);
+                    });
+                    
+                    displaySimilarResults(sampleData, searchTerm);
+                    searchSpinner.style.display = 'none';
+                    isSearching = false;
+                }, 500); // Simulate network delay
+            }
+            
+            // Display similar results with highlighting
+            function displaySimilarResults(results, searchTerm) {
+                similarResultsList.innerHTML = '';
+                
+                if (results.length === 0) {
+                    similarResultsList.innerHTML = '<div class="text-center p-3">No similar WorkItems found.</div>';
+                    similarResultsModal.show();
+                    return;
+                }
+                
+                results.forEach(item => {
+                    // Highlight matching characters
+                    const highlightedName = highlightMatches(item.name, searchTerm);
+                    const highlightedDesc = highlightMatches(item.desc, searchTerm);
+                    const highlightedOwner = highlightMatches(item.owner, searchTerm);
+                    
+                    const resultItem = document.createElement('a');
+                    resultItem.className = 'list-group-item list-group-item-action';
+                    resultItem.innerHTML = `
+                        <div class="d-flex w-100 justify-content-between">
+                            <h5 class="mb-1">${highlightedName}</h5>
+                            <small class="text-muted">v${item.version}</small>
+                        </div>
+                        <p class="mb-1">${highlightedDesc}</p>
+                        <small class="text-muted">Owner: ${highlightedOwner}</small>
+                    `;
+                    
+                    // Add click event to select this WorkItem
+                    resultItem.addEventListener('click', () => {
+                        populateFormWithWorkItem(item);
+                        similarResultsModal.hide();
+                    });
+                    
+                    similarResultsList.appendChild(resultItem);
+                });
+                
+                similarResultsModal.show();
+            }
+            
+            // Highlight matching characters in text
+            function highlightMatches(text, searchTerm) {
+                if (!searchTerm || searchTerm.trim() === '') return text;
+                
+                const searchTermLower = searchTerm.toLowerCase();
+                let result = '';
+                let lastIndex = 0;
+                
+                // Find all occurrences of the search term in the text
+                const textLower = text.toLowerCase();
+                let index = textLower.indexOf(searchTermLower);
+                
+                while (index !== -1) {
+                    // Add the text before the match
+                    result += text.substring(lastIndex, index);
+                    
+                    // Add the highlighted match
+                    result += '<strong>' + text.substring(index, index + searchTerm.length) + '</strong>';
+                    
+                    // Update lastIndex and find the next occurrence
+                    lastIndex = index + searchTerm.length;
+                    index = textLower.indexOf(searchTermLower, lastIndex);
+                }
+                
+                // Add any remaining text
+                result += text.substring(lastIndex);
+                
+                return result;
+            }
+            
+            // Populate the existing form with WorkItem data
+            function populateFormWithWorkItem(item) {
+                // Update search input with selected name
+                searchInput.value = item.name;
+                
+                // Populate the existing Thymeleaf form fields
+                document.getElementById('workItemId').value = item.id;
+                document.getElementById('name').value = item.name;
+                document.getElementById('email').value = item.email;
+                document.getElementById('version').value = item.version;
+                document.getElementById('desc').value = item.desc;
+                document.getElementById('owner').value = item.owner;
+                
+                // If you have other fields, populate them here
+                
+                // Optional: Trigger change events if you have any listeners on these fields
+                triggerChangeEvent(document.getElementById('name'));
+                triggerChangeEvent(document.getElementById('email'));
+                triggerChangeEvent(document.getElementById('version'));
+                triggerChangeEvent(document.getElementById('desc'));
+                triggerChangeEvent(document.getElementById('owner'));
+            }
+            
+            // Helper function to trigger change events
+            function triggerChangeEvent(element) {
+                const event = new Event('change', { bubbles: true });
+                element.dispatchEvent(event);
+            }
+        });
+    </script>
+</body>
+</html>
+
+/*******************************************************
+ * VERSION 2: WORKITEM SEARCH WITH TABLE LAYOUT AND PAGINATION
+ *******************************************************/
+
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WorkItem Search</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .autocomplete-container {
+            position: relative;
+        }
+        .autocomplete-results {
+            position: absolute;
+            z-index: 1000;
+            width: 100%;
+            max-height: 300px;
+            overflow-y: auto;
+            display: none;
+            background-color: white;
+        }
+        .autocomplete-item {
+            cursor: pointer;
+            padding: 8px 12px;
+        }
+        .autocomplete-item:hover {
+            background-color: #f8f9fa;
+        }
+        .similar-results-modal .modal-body {
+            max-height: 500px;
+            overflow-y: auto;
+        }
+        .search-spinner {
+            position: absolute;
+            right: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            z-index: 5;
+            display: none;
+        }
+        .search-input-container {
+            position: relative;
+        }
+        .pagination-container {
+            margin-top: 20px;
+        }
+        .results-table tbody tr {
+            cursor: pointer;
+        }
+        .results-table tbody tr:hover {
+            background-color: rgba(0,0,0,0.05);
+        }
+        .results-table .version-badge {
+            font-size: 0.8em;
+            padding: 0.25em 0.6em;
+        }
+        .results-table td {
+            vertical-align: middle;
+        }
+    </style>
+</head>
+<body>
+    <div class="container mt-4">
+        <!-- This is your existing form with Thymeleaf fields -->
+        <form th:object="${workItem}" method="post" id="workItemForm">
+            <!-- Hidden ID field -->
+            <input type="hidden" th:field="*{id}" id="workItemId">
+            
+            <div class="row mb-3">
+                <div class="col-md-6">
+                    <label for="name" class="form-label">Name</label>
+                    <input type="text" class="form-control" th:field="*{name}" id="name">
+                </div>
+                <div class="col-md-6">
+                    <label for="email" class="form-label">Email</label>
+                    <input type="email" class="form-control" th:field="*{email}" id="email">
+                </div>
+            </div>
+            
+            <div class="row mb-3">
+                <div class="col-md-6">
+                    <label for="version" class="form-label">Version</label>
+                    <input type="text" class="form-control" th:field="*{version}" id="version">
+                </div>
+                <div class="col-md-6">
+                    <label for="owner" class="form-label">Owner</label>
+                    <input type="text" class="form-control" th:field="*{owner}" id="owner">
+                </div>
+            </div>
+            
+            <div class="mb-3">
+                <label for="desc" class="form-label">Description</label>
+                <textarea class="form-control" th:field="*{desc}" id="desc" rows="3"></textarea>
+            </div>
+            
+            <!-- Other form fields would go here -->
+            
+            <!-- Search component to find and populate WorkItem -->
+            <div class="card mb-3">
+                <div class="card-header">
+                    Search for WorkItem
+                </div>
+                <div class="card-body">
+                    <div class="input-group">
+                        <div class="autocomplete-container flex-grow-1">
+                            <div class="search-input-container">
+                                <input type="text" id="workItemSearch" class="form-control" placeholder="Search for a WorkItem by name...">
+                                <div class="search-spinner">
+                                    <div class="spinner-border spinner-border-sm text-primary" role="status">
+                                        <span class="visually-hidden">Loading...</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="autocomplete-results list-group shadow-sm border" id="autocompleteResults"></div>
+                        </div>
+                        <button class="btn btn-outline-secondary" type="button" id="findSimilarBtn" disabled>
+                            <i class="bi bi-search"></i> Find Similar
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <button type="submit" class="btn btn-primary">Save</button>
+        </form>
+    </div>
+
+    <!-- Similar Results Modal with table layout and pagination -->
+    <div class="modal fade similar-results-modal" id="similarResultsModal" tabindex="-1" aria-labelledby="similarResultsModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="similarResultsModalLabel">Similar WorkItems</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <!-- Results table -->
+                    <div class="table-responsive">
+                        <table class="table table-hover results-table">
+                            <thead>
+                                <tr>
+                                    <th style="width: 30%">Name</th>
+                                    <th style="width: 50%">Description</th>
+                                    <th style="width: 20%">Owner</th>
+                                </tr>
+                            </thead>
+                            <tbody id="similarResultsTable">
+                                <!-- Similar results will be populated here as table rows -->
+                            </tbody>
+                        </table>
+                    </div>
+                    
+                    <!-- Pagination -->
+                    <div class="pagination-container d-flex justify-content-center">
+                        <nav aria-label="Similar results pagination">
+                            <ul class="pagination" id="similarResultsPagination">
+                                <!-- Pagination will be populated here -->
+                            </ul>
+                        </nav>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const searchInput = document.getElementById('workItemSearch');
+            const autocompleteResults = document.getElementById('autocompleteResults');
+            const findSimilarBtn = document.getElementById('findSimilarBtn');
+            const similarResultsModal = new bootstrap.Modal(document.getElementById('similarResultsModal'));
+            const similarResultsTable = document.getElementById('similarResultsTable');
+            const similarResultsPagination = document.getElementById('similarResultsPagination');
+            const searchSpinner = document.querySelector('.search-spinner');
+            
+            let searchTimeout;
+            let lastSearchTerm = '';
+            let isSearching = false;
+            let allSimilarResults = []; // Store all results for pagination
+            let currentPage = 1;
+            const itemsPerPage = 10; // Number of items per page in the table
+            
+            // Search input event handler
+            searchInput.addEventListener('input', function() {
+                const searchTerm = this.value.trim();
+                lastSearchTerm = searchTerm;
+                
+                // Enable/disable the find similar button
+                findSimilarBtn.disabled = searchTerm.length < 1;
+                
+                // Clear previous timeout
+                clearTimeout(searchTimeout);
+                
+                // Hide results if search term is empty
+                if (searchTerm.length < 1) {
+                    autocompleteResults.style.display = 'none';
+                    searchSpinner.style.display = 'none';
+                    return;
+                }
+                
+                // Show spinner immediately
+                searchSpinner.style.display = 'block';
+                isSearching = true;
+                
+                // Set timeout for search to avoid too many requests (small debounce)
+                searchTimeout = setTimeout(() => {
+                    fetchAutocompleteResults(searchTerm);
+                }, 150);
+            });
+            
+            // Find similar button click handler
+            findSimilarBtn.addEventListener('click', function() {
+                const searchTerm = searchInput.value.trim();
+                if (searchTerm.length >= 1) {
+                    // Show spinner
+                    searchSpinner.style.display = 'block';
+                    isSearching = true;
+                    
+                    // Reset pagination
+                    currentPage = 1;
+                    
+                    fetchSimilarResults(searchTerm);
+                }
+            });
+            
+            // Close autocomplete results when clicking outside
+            document.addEventListener('click', function(e) {
+                if (!searchInput.contains(e.target) && !autocompleteResults.contains(e.target)) {
+                    autocompleteResults.style.display = 'none';
+                }
+            });
+            
+            // Fetch autocomplete results
+            function fetchAutocompleteResults(searchTerm) {
+                // In a real application, this would be an AJAX call to your Spring Boot backend
+                // For this prototype, we'll simulate the response
+                
+                // Example AJAX call (commented out):
+                /*
+                fetch(`/api/workitems/autocomplete?term=${encodeURIComponent(searchTerm)}`)
+                    .then(response => response.json())
+                    .then(data => {
+                        displayAutocompleteResults(data, searchTerm);
+                        searchSpinner.style.display = 'none';
+                        isSearching = false;
+                    })
+                    .catch(error => {
+                        console.error('Error fetching autocomplete results:', error);
+                        searchSpinner.style.display = 'none';
+                        isSearching = false;
+                    });
+                */
+                
+                // Simulate AJAX response with sample data
+                setTimeout(() => {
+                    const sampleData = [
+                        { id: 1, name: "Project Alpha", email: "alpha@example.com", version: "1.0.0", desc: "Main project for client A", owner: "John Doe" },
+                        { id: 2, name: "Project Beta", email: "beta@example.com", version: "2.1.5", desc: "Secondary project for client B", owner: "Jane Smith" },
+                        { id: 3, name: "Alpha Testing", email: "testing@example.com", version: "0.9.1", desc: "Testing phase for Project Alpha", owner: "Mike Johnson" }
+                    ].filter(item => item.name.toLowerCase().includes(searchTerm.toLowerCase()));
+                    
+                    displayAutocompleteResults(sampleData, searchTerm);
+                    searchSpinner.style.display = 'none';
+                    isSearching = false;
+                }, 300); // Simulate network delay
+            }
+            
+            // Display autocomplete results with highlighting
+            function displayAutocompleteResults(results, searchTerm) {
+                autocompleteResults.innerHTML = '';
+                
+                if (results.length === 0) {
+                    autocompleteResults.style.display = 'none';
+                    return;
+                }
+                
+                results.forEach(item => {
+                    const resultItem = document.createElement('a');
+                    resultItem.className = 'list-group-item list-group-item-action autocomplete-item';
+                    
+                    // Highlight matching characters in name
+                    const highlightedName = highlightMatches(item.name, searchTerm);
+                    
+                    resultItem.innerHTML = `${highlightedName} <small class="text-muted">(${item.version})</small>`;
+                    resultItem.addEventListener('click', () => {
+                        populateFormWithWorkItem(item);
+                        autocompleteResults.style.display = 'none';
+                    });
+                    autocompleteResults.appendChild(resultItem);
+                });
+                
+                autocompleteResults.style.display = 'block';
+            }
+            
+            // Fetch similar results for modal
+            function fetchSimilarResults(searchTerm) {
+                // In a real application, this would be an AJAX call to your Spring Boot backend
+                // For this prototype, we'll simulate the response
+                
+                // Example AJAX call (commented out):
+                /*
+                fetch(`/api/workitems/similar?term=${encodeURIComponent(searchTerm)}`)
+                    .then(response => response.json())
+                    .then(data => {
+                        allSimilarResults = data;
+                        displaySimilarResultsPage(currentPage, searchTerm);
+                        searchSpinner.style.display = 'none';
+                        isSearching = false;
+                    })
+                    .catch(error => {
+                        console.error('Error fetching similar results:', error);
+                        searchSpinner.style.display = 'none';
+                        isSearching = false;
+                    });
+                */
+                
+                // Simulate AJAX response with sample data
+                setTimeout(() => {
+                    // Generate more sample data for pagination demo
+                    allSimilarResults = [
+                        { id: 1, name: "Project Alpha", email: "alpha@example.com", version: "1.0.0", desc: "Main project for client A", owner: "John Doe" },
+                        { id: 2, name: "Project Beta", email: "beta@example.com", version: "2.1.5", desc: "Secondary project for client B", owner: "Jane Smith" },
+                        { id: 3, name: "Alpha Testing", email: "testing@example.com", version: "0.9.1", desc: "Testing phase for Project Alpha", owner: "Mike Johnson" },
+                        { id: 4, name: "Project Gamma", email: "gamma@example.com", version: "0.5.0", desc: "Experimental project", owner: "Sarah Williams" },
+                        { id: 5, name: "Alpha Prototype", email: "prototype@example.com", version: "0.1.2", desc: "Initial prototype for Project Alpha", owner: "David Brown" },
+                        { id: 6, name: "Beta Release", email: "release@example.com", version: "2.0.0", desc: "Release version of Project Beta", owner: "Robert Taylor" },
+                        { id: 7, name: "Alpha Framework", email: "framework@example.com", version: "1.2.3", desc: "Framework for Alpha projects", owner: "Emily White" },
+                        { id: 8, name: "Project Delta", email: "delta@example.com", version: "0.3.7", desc: "New project in alpha stage", owner: "Thomas Green" },
+                        { id: 9, name: "Alpha Solutions", email: "solutions@example.com", version: "3.0.1", desc: "Enterprise solutions package", owner: "Lisa Black" },
+                        { id: 10, name: "Project Omega", email: "omega@example.com", version: "1.5.2", desc: "Final project in the series", owner: "James Wilson" },
+                        { id: 11, name: "Alpha Team", email: "team@example.com", version: "2.2.0", desc: "Team collaboration project", owner: "Patricia Moore" },
+                        { id: 12, name: "Beta Analytics", email: "analytics@example.com", version: "1.1.0", desc: "Analytics module for Project Beta", owner: "Richard Davis" },
+                        { id: 13, name: "Project Sigma", email: "sigma@example.com", version: "0.8.5", desc: "Statistical analysis project", owner: "Jennifer Martin" }
+                    ].filter(item => {
+                        const searchLower = searchTerm.toLowerCase();
+                        return item.name.toLowerCase().includes(searchLower) || 
+                               item.desc.toLowerCase().includes(searchLower) ||
+                               item.email.toLowerCase().includes(searchLower) ||
+                               item.owner.toLowerCase().includes(searchLower);
+                    });
+                    
+                    displaySimilarResultsPage(currentPage, searchTerm);
+                    searchSpinner.style.display = 'none';
+                    isSearching = false;
+                }, 500); // Simulate network delay
+            }
+            
+            // Display similar results page with pagination
+            function displaySimilarResultsPage(page, searchTerm) {
+                similarResultsTable.innerHTML = '';
+                
+                if (allSimilarResults.length === 0) {
+                    similarResultsTable.innerHTML = '<tr><td colspan="3" class="text-center">No similar WorkItems found.</td></tr>';
+                    similarResultsPagination.innerHTML = '';
+                    similarResultsModal.show();
+                    return;
+                }
+                
+                // Calculate pagination
+                const totalPages = Math.ceil(allSimilarResults.length / itemsPerPage);
+                const startIndex = (page - 1) * itemsPerPage;
+                const endIndex = Math.min(startIndex + itemsPerPage, allSimilarResults.length);
+                const currentPageItems = allSimilarResults.slice(startIndex, endIndex);
+                
+                // Display current page items in table
+                currentPageItems.forEach(item => {
+                    // Highlight matching characters
+                    const highlightedName = highlightMatches(item.name, searchTerm);
+                    const highlightedDesc = highlightMatches(item.desc, searchTerm);
+                    const highlightedOwner = highlightMatches(item.owner, searchTerm);
+                    
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td>
+                            ${highlightedName}
+                            <span class="badge bg-secondary version-badge ms-1">${item.version}</span>
+                        </td>
+                        <td>${highlightedDesc}</td>
+                        <td>${highlightedOwner}</td>
+                    `;
+                    
+                    // Add click event to select this WorkItem
+                    row.addEventListener('click', () => {
+                        populateFormWithWorkItem(item);
+                        similarResultsModal.hide();
+                    });
+                    
+                    similarResultsTable.appendChild(row);
+                });
+                
+                // Update pagination controls
+                updatePaginationControls(page, totalPages, searchTerm);
+                
+                // Show the modal
+                similarResultsModal.show();
+            }
+            
+            // Update pagination controls
+            function updatePaginationControls(currentPage, totalPages, searchTerm) {
+                similarResultsPagination.innerHTML = '';
+                
+                // Previous button
+                const prevLi = document.createElement('li');
+                prevLi.className = `page-item ${currentPage === 1 ? 'disabled' : ''}`;
+                prevLi.innerHTML = `<a class="page-link" href="#" aria-label="Previous"><span aria-hidden="true">&laquo;</span></a>`;
+                if (currentPage > 1) {
+                    prevLi.querySelector('a').addEventListener('click', (e) => {
+                        e.preventDefault();
+                        displaySimilarResultsPage(currentPage - 1, searchTerm);
+                    });
+                }
+                similarResultsPagination.appendChild(prevLi);
+                
+                // Page numbers
+                const maxVisiblePages = 5;
+                let startPage = Math.max(1, currentPage - Math.floor(maxVisiblePages / 2));
+                let endPage = Math.min(totalPages, startPage + maxVisiblePages - 1);
+                
+                // Adjust if we're near the end
+                if (endPage - startPage + 1 < maxVisiblePages) {
+                    startPage = Math.max(1, endPage - maxVisiblePages + 1);
+                }
+                
+                // First page if not visible
+                if (startPage > 1) {
+                    const firstLi = document.createElement('li');
+                    firstLi.className = 'page-item';
+                    firstLi.innerHTML = `<a class="page-link" href="#">1</a>`;
+                    firstLi.querySelector('a').addEventListener('click', (e) => {
+                        e.preventDefault();
+                        displaySimilarResultsPage(1, searchTerm);
+                    });
+                    similarResultsPagination.appendChild(firstLi);
+                    
+                    // Ellipsis if needed
+                    if (startPage > 2) {
+                        const ellipsisLi = document.createElement('li');
+                        ellipsisLi.className = 'page-item disabled';
+                        ellipsisLi.innerHTML = `<a class="page-link" href="#">...</a>`;
+                        similarResultsPagination.appendChild(ellipsisLi);
+                    }
+                }
+                
+                // Page numbers
+                for (let i = startPage; i <= endPage; i++) {
+                    const pageLi = document.createElement('li');
+                    pageLi.className = `page-item ${i === currentPage ? 'active' : ''}`;
+                    pageLi.innerHTML = `<a class="page-link" href="#">${i}</a>`;
+                    pageLi.querySelector('a').addEventListener('click', (e) => {
+                        e.preventDefault();
+                        displaySimilarResultsPage(i, searchTerm);
+                    });
+                    similarResultsPagination.appendChild(pageLi);
+                }
+                
+                // Last page if not visible
+                if (endPage < totalPages) {
+                    // Ellipsis if needed
+                    if (endPage < totalPages - 1) {
+                        const ellipsisLi = document.createElement('li');
+                        ellipsisLi.className = 'page-item disabled';
+                        ellipsisLi.innerHTML = `<a class="page-link" href="#">...</a>`;
+                        similarResultsPagination.appendChild(ellipsisLi);
+                    }
+                    
+                    const lastLi = document.createElement('li');
+                    lastLi.className = 'page-item';
+                    lastLi.innerHTML = `<a class="page-link" href="#">${totalPages}</a>`;
+                    lastLi.querySelector('a').addEventListener('click', (e) => {
+                        e.preventDefault();
+                        displaySimilarResultsPage(totalPages, searchTerm);
+                    });
+                    similarResultsPagination.appendChild(lastLi);
+                }
+                
+                // Next button
+                const nextLi = document.createElement('li');
+                nextLi.className = `page-item ${currentPage === totalPages ? 'disabled' : ''}`;
+                nextLi.innerHTML = `<a class="page-link" href="#" aria-label="Next"><span aria-hidden="true">&raquo;</span></a>`;
+                if (currentPage < totalPages) {
+                    nextLi.querySelector('a').addEventListener('click', (e) => {
+                        e.preventDefault();
+                        displaySimilarResultsPage(currentPage + 1, searchTerm);
+                    });
+                }
+                similarResultsPagination.appendChild(nextLi);
+            }
+            
+            // Highlight matching characters in text
+            function highlightMatches(text, searchTerm) {
+                if (!searchTerm || searchTerm.trim() === '') return text;
+                
+                const searchTermLower = searchTerm.toLowerCase();
+                let result = '';
+                let lastIndex = 0;
+                
+                // Find all occurrences of the search term in the text
+                const textLower = text.toLowerCase();
+                let index = textLower.indexOf(searchTermLower);
+                
+                while (index !== -1) {
+                    // Add the text before the match
+                    result += text.substring(lastIndex, index);
+                    
+                    // Add the highlighted match
+                    result += '<strong>' + text.substring(index, index + searchTerm.length) + '</strong>';
+                    
+                    // Update lastIndex and find the next occurrence
+                    lastIndex = index + searchTerm.length;
+                    index = textLower.indexOf(searchTermLower, lastIndex);
+                }
+                
+                // Add any remaining text
+                result += text.substring(lastIndex);
+                
+                return result;
+            }
+            
+            // Populate the existing form with WorkItem data
+            function populateFormWithWorkItem(item) {
+                // Update search input with selected name
+                searchInput.value = item.name;
+                
+                // Populate the existing Thymeleaf form fields
+                document.getElementById('workItemId').value = item.id;
+                document.getElementById('name').value = item.name;
+                document.getElementById('email').value = item.email;
+                document.getElementById('version').value = item.version;
+                document.getElementById('desc').value = item.desc;
+                document.getElementById('owner').value = item.owner;
+                
+                // If you have other fields, populate them here
+                
+                // Optional: Trigger change events if you have any listeners on these fields
+                triggerChangeEvent(document.getElementById('name'));
+                triggerChangeEvent(document.getElementById('email'));
+                triggerChangeEvent(document.getElementById('version'));
+                triggerChangeEvent(document.getElementById('desc'));
+                triggerChangeEvent(document.getElementById('owner'));
+            }
+            
+            // Helper function to trigger change events
+            function triggerChangeEvent(element) {
+                const event = new Event('change', { bubbles: true });
+                element.dispatchEvent(event);
+            }
+        });
+    </script>
+</body>
+</html>
+
+/*******************************************************
+ * VERSION 3: FINAL VERSION WITH ENABLED SEARCH BUTTON AND ERROR HANDLING
+ *******************************************************/
+
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WorkItem Search</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .autocomplete-container {
+            position: relative;
+        }
+        .autocomplete-results {
+            position: absolute;
+            z-index: 1000;
+            width: 100%;
+            max-height: 300px;
+            overflow-y: auto;
+            display: none;
+            background-color: white;
+        }
+        .autocomplete-item {
+            cursor: pointer;
+            padding: 8px 12px;
+        }
+        .autocomplete-item:hover {
+            background-color: #f8f9fa;
+        }
+        .similar-results-modal .modal-body {
+            max-height: 500px;
+            overflow-y: auto;
+        }
+        .search-spinner {
+            position: absolute;
+            right: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            z-index: 5;
+            display: none;
+        }
+        .search-input-container {
+            position: relative;
+        }
+        .pagination-container {
+            margin-top: 20px;
+        }
+        .results-table tbody tr {
+            cursor: pointer;
+        }
+        .results-table tbody tr:hover {
+            background-color: rgba(0,0,0,0.05);
+        }
+        .results-table .version-badge {
+            font-size: 0.8em;
+            padding: 0.25em 0.6em;
+        }
+        .results-table td {
+            vertical-align: middle;
+        }
+        .search-error {
+            color: #dc3545;
+            font-size: 0.875rem;
+            margin-top: 0.25rem;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container mt-4">
+        <!-- This is your existing form with Thymeleaf fields -->
+        <form th:object="${workItem}" method="post" id="workItemForm">
+            <!-- Hidden ID field -->
+            <input type="hidden" th:field="*{id}" id="workItemId">
+            
+            <div class="row mb-3">
+                <div class="col-md-6">
+                    <label for="name" class="form-label">Name</label>
+                    <input type="text" class="form-control" th:field="*{name}" id="name">
+                </div>
+                <div class="col-md-6">
+                    <label for="email" class="form-label">Email</label>
+                    <input type="email" class="form-control" th:field="*{email}" id="email">
+                </div>
+            </div>
+            
+            <div class="row mb-3">
+                <div class="col-md-6">
+                    <label for="version" class="form-label">Version</label>
+                    <input type="text" class="form-control" th:field="*{version}" id="version">
+                </div>
+                <div class="col-md-6">
+                    <label for="owner" class="form-label">Owner</label>
+                    <input type="text" class="form-control" th:field="*{owner}" id="owner">
+                </div>
+            </div>
+            
+            <div class="mb-3">
+                <label for="desc" class="form-label">Description</label>
+                <textarea class="form-control" th:field="*{desc}" id="desc" rows="3"></textarea>
+            </div>
+            
+            <!-- Other form fields would go here -->
+            
+            <!-- Search component to find and populate WorkItem -->
+            <div class="card mb-3">
+                <div class="card-header">
+                    Search for WorkItem
+                </div>
+                <div class="card-body">
+                    <div class="input-group mb-2">
+                        <div class="autocomplete-container flex-grow-1">
+                            <div class="search-input-container">
+                                <input type="text" id="workItemSearch" class="form-control" placeholder="Search for a WorkItem by name...">
+                                <div class="search-spinner">
+                                    <div class="spinner-border spinner-border-sm text-primary" role="status">
+                                        <span class="visually-hidden">Loading...</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="search-error" id="searchError">Please enter a search term</div>
+                            <div class="autocomplete-results list-group shadow-sm border" id="autocompleteResults"></div>
+                        </div>
+                        <button class="btn btn-outline-secondary" type="button" id="findSimilarBtn">
+                            <i class="bi bi-search"></i> Search
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <button type="submit" class="btn btn-primary">Save</button>
+        </form>
+    </div>
+
+    <!-- Similar Results Modal with table layout and pagination -->
+    <div class="modal fade similar-results-modal" id="similarResultsModal" tabindex="-1" aria-labelledby="similarResultsModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="similarResultsModalLabel">Similar WorkItems</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <!-- Results table -->
+                    <div class="table-responsive">
+                        <table class="table table-hover results-table">
+                            <thead>
+                                <tr>
+                                    <th style="width: 30%">Name</th>
+                                    <th style="width: 50%">Description</th>
+                                    <th style="width: 20%">Owner</th>
+                                </tr>
+                            </thead>
+                            <tbody id="similarResultsTable">
+                                <!-- Similar results will be populated here as table rows -->
+                            </tbody>
+                        </table>
+                    </div>
+                    
+                    <!-- Pagination -->
+                    <div class="pagination-container d-flex justify-content-center">
+                        <nav aria-label="Similar results pagination">
+                            <ul class="pagination" id="similarResultsPagination">
+                                <!-- Pagination will be populated here -->
+                            </ul>
+                        </nav>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const searchInput = document.getElementById('workItemSearch');
+            const autocompleteResults = document.getElementById('autocompleteResults');
+            const findSimilarBtn = document.getElementById('findSimilarBtn');
+            const searchError = document.getElementById('searchError');
+            const similarResultsModal = new bootstrap.Modal(document.getElementById('similarResultsModal'));
+            const similarResultsTable = document.getElementById('similarResultsTable');
+            const similarResultsPagination = document.getElementById('similarResultsPagination');
+            const searchSpinner = document.querySelector('.search-spinner');
+            
+            let searchTimeout;
+            let lastSearchTerm = '';
+            let isSearching = false;
+            let allSimilarResults = []; // Store all results for pagination
+            let currentPage = 1;
+            const itemsPerPage = 10; // Number of items per page in the table
+            
+            // Search input event handler
+            searchInput.addEventListener('input', function() {
+                const searchTerm = this.value.trim();
+                lastSearchTerm = searchTerm;
+                
+                // Hide error message when user starts typing
+                searchError.style.display = 'none';
+                
+                // Clear previous timeout
+                clearTimeout(searchTimeout);
+                
+                // Hide results if search term is empty
+                if (searchTerm.length < 1) {
+                    autocompleteResults.style.display = 'none';
+                    searchSpinner.style.display = 'none';
+                    return;
+                }
+                
+                // Show spinner immediately
+                searchSpinner.style.display = 'block';
+                isSearching = true;
+                
+                // Set timeout for search to avoid too many requests (small debounce)
+                searchTimeout = setTimeout(() => {
+                    fetchAutocompleteResults(searchTerm);
+                }, 150);
+            });
+            
+            // Find similar button click handler
+            findSimilarBtn.addEventListener('click', function() {
+                const searchTerm = searchInput.value.trim();
+                
+                // Show error if search term is empty
+                if (searchTerm.length < 1) {
+                    searchError.style.display = 'block';
+                    return;
+                }
+                
+                // Hide error message
+                searchError.style.display = 'none';
+                
+                // Show spinner
+                searchSpinner.style.display = 'block';
+                isSearching = true;
+                
+                // Reset pagination
+                currentPage = 1;
+                
+                fetchSimilarResults(searchTerm);
+            });
+            
+            // Close autocomplete results when clicking outside
+            document.addEventListener('click', function(e) {
+                if (!searchInput.contains(e.target) && !autocompleteResults.contains(e.target)) {
+                    autocompleteResults.style.display = 'none';
+                }
+            });
+            
+            // Fetch autocomplete results
+            function fetchAutocompleteResults(searchTerm) {
+                // In a real application, this would be an AJAX call to your Spring Boot backend
+                // For this prototype, we'll simulate the response
+                
+                // Example AJAX call (commented out):
+                /*
+                fetch(`/api/workitems/autocomplete?term=${encodeURIComponent(searchTerm)}`)
+                    .then(response => response.json())
+                    .then(data => {
+                        displayAutocompleteResults(data, searchTerm);
+                        searchSpinner.style.display = 'none';
+                        isSearching = false;
+                    })
+                    .catch(error => {
+                        console.error('Error fetching autocomplete results:', error);
+                        searchSpinner.style.display = 'none';
+                        isSearching = false;
+                    });
+                */
+                
+                // Simulate AJAX response with sample data
+                setTimeout(() => {
+                    const sampleData = [
+                        { id: 1, name: "Project Alpha", email: "alpha@example.com", version: "1.0.0", desc: "Main project for client A", owner: "John Doe" },
+                        { id: 2, name: "Project Beta", email: "beta@example.com", version: "2.1.5", desc: "Secondary project for client B", owner: "Jane Smith" },
+                        { id: 3, name: "Alpha Testing", email: "testing@example.com", version: "0.9.1", desc: "Testing phase for Project Alpha", owner: "Mike Johnson" }
+                    ].filter(item => item.name.toLowerCase().includes(searchTerm.toLowerCase()));
+                    
+                    displayAutocompleteResults(sampleData, searchTerm);
+                    searchSpinner.style.display = 'none';
+                    isSearching = false;
+                }, 300); // Simulate network delay
+            }
+            
+            // Display autocomplete results with highlighting
+            function displayAutocompleteResults(results, searchTerm) {
+                autocompleteResults.innerHTML = '';
+                
+                if (results.length === 0) {
+                    autocompleteResults.style.display = 'none';
+                    return;
+                }
+                
+                results.forEach(item => {
+                    const resultItem = document.createElement('a');
+                    resultItem.className = 'list-group-item list-group-item-action autocomplete-item';
+                    
+                    // Highlight matching characters in name
+                    const highlightedName = highlightMatches(item.name, searchTerm);
+                    
+                    resultItem.innerHTML = `${highlightedName} <small class="text-muted">(${item.version})</small>`;
+                    resultItem.addEventListener('click', () => {
+                        populateFormWithWorkItem(item);
+                        autocompleteResults.style.display = 'none';
+                    });
+                    autocompleteResults.appendChild(resultItem);
+                });
+                
+                autocompleteResults.style.display = 'block';
+            }
+            
+            // Fetch similar results for modal
+            function fetchSimilarResults(searchTerm) {
+                // In a real application, this would be an AJAX call to your Spring Boot backend
+                // For this prototype, we'll simulate the response
+                
+                // Example AJAX call (commented out):
+                /*
+                fetch(`/api/workitems/similar?term=${encodeURIComponent(searchTerm)}`)
+                    .then(response => response.json())
+                    .then(data => {
+                        allSimilarResults = data;
+                        displaySimilarResultsPage(currentPage, searchTerm);
+                        searchSpinner.style.display = 'none';
+                        isSearching = false;
+                    })
+                    .catch(error => {
+                        console.error('Error fetching similar results:', error);
+                        searchSpinner.style.display = 'none';
+                        isSearching = false;
+                    });
+                */
+                
+                // Simulate AJAX response with sample data
+                setTimeout(() => {
+                    // Generate more sample data for pagination demo
+                    allSimilarResults = [
+                        { id: 1, name: "Project Alpha", email: "alpha@example.com", version: "1.0.0", desc: "Main project for client A", owner: "John Doe" },
+                        { id: 2, name: "Project Beta", email: "beta@example.com", version: "2.1.5", desc: "Secondary project for client B", owner: "Jane Smith" },
+                        { id: 3, name: "Alpha Testing", email: "testing@example.com", version: "0.9.1", desc: "Testing phase for Project Alpha", owner: "Mike Johnson" },
+                        { id: 4, name: "Project Gamma", email: "gamma@example.com", version: "0.5.0", desc: "Experimental project", owner: "Sarah Williams" },
+                        { id: 5, name: "Alpha Prototype", email: "prototype@example.com", version: "0.1.2", desc: "Initial prototype for Project Alpha", owner: "David Brown" },
+                        { id: 6, name: "Beta Release", email: "release@example.com", version: "2.0.0", desc: "Release version of Project Beta", owner: "Robert Taylor" },
+                        { id: 7, name: "Alpha Framework", email: "framework@example.com", version: "1.2.3", desc: "Framework for Alpha projects", owner: "Emily White" },
+                        { id: 8, name: "Project Delta", email: "delta@example.com", version: "0.3.7", desc: "New project in alpha stage", owner: "Thomas Green" },
+                        { id: 9, name: "Alpha Solutions", email: "solutions@example.com", version: "3.0.1", desc: "Enterprise solutions package", owner: "Lisa Black" },
+                        { id: 10, name: "Project Omega", email: "omega@example.com", version: "1.5.2", desc: "Final project in the series", owner: "James Wilson" },
+                        { id: 11, name: "Alpha Team", email: "team@example.com", version: "2.2.0", desc: "Team collaboration project", owner: "Patricia Moore" },
+                        { id: 12, name: "Beta Analytics", email: "analytics@example.com", version: "1.1.0", desc: "Analytics module for Project Beta", owner: "Richard Davis" },
+                        { id: 13, name: "Project Sigma", email: "sigma@example.com", version: "0.8.5", desc: "Statistical analysis project", owner: "Jennifer Martin" }
+                    ].filter(item => {
+                        const searchLower = searchTerm.toLowerCase();
+                        return item.name.toLowerCase().includes(searchLower) || 
+                               item.desc.toLowerCase().includes(searchLower) ||
+                               item.email.toLowerCase().includes(searchLower) ||
+                               item.owner.toLowerCase().includes(searchLower);
+                    });
+                    
+                    displaySimilarResultsPage(currentPage, searchTerm);
+                    searchSpinner.style.display = 'none';
+                    isSearching = false;
+                }, 500); // Simulate network delay
+            }
+            
+            // Display similar results page with pagination
+            function displaySimilarResultsPage(page, searchTerm) {
+                similarResultsTable.innerHTML = '';
+                
+                if (allSimilarResults.length === 0) {
+                    similarResultsTable.innerHTML = '<tr><td colspan="3" class="text-center">No similar WorkItems found.</td></tr>';
+                    similarResultsPagination.innerHTML = '';
+                    similarResultsModal.show();
+                    return;
+                }
+                
+                // Calculate pagination
+                const totalPages = Math.ceil(allSimilarResults.length / itemsPerPage);
+                const startIndex = (page - 1) * itemsPerPage;
+                const endIndex = Math.min(startIndex + itemsPerPage, allSimilarResults.length);
+                const currentPageItems = allSimilarResults.slice(startIndex, endIndex);
+                
+                // Display current page items in table
+                currentPageItems.forEach(item => {
+                    // Highlight matching characters
+                    const highlightedName = highlightMatches(item.name, searchTerm);
+                    const highlightedDesc = highlightMatches(item.desc, searchTerm);
+                    const highlightedOwner = highlightMatches(item.owner, searchTerm);
+                    
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td>
+                            ${highlightedName}
+                            <span class="badge bg-secondary version-badge ms-1">${item.version}</span>
+                        </td>
+                        <td>${highlightedDesc}</td>
+                        <td>${highlightedOwner}</td>
+                    `;
+                    
+                    // Add click event to select this WorkItem
+                    row.addEventListener('click', () => {
+                        populateFormWithWorkItem(item);
+                        similarResultsModal.hide();
+                    });
+                    
+                    similarResultsTable.appendChild(row);
+                });
+                
+                // Update pagination controls
+                updatePaginationControls(page, totalPages, searchTerm);
+                
+                // Show the modal
+                similarResultsModal.show();
+            }
+            
+            // Update pagination controls
+            function updatePaginationControls(currentPage, totalPages, searchTerm) {
+                similarResultsPagination.innerHTML = '';
+                
+                // Previous button
+                const prevLi = document.createElement('li');
+                prevLi.className = `page-item ${currentPage === 1 ? 'disabled' : ''}`;
+                prevLi.innerHTML = `<a class="page-link" href="#" aria-label="Previous"><span aria-hidden="true">&laquo;</span></a>`;
+                if (currentPage > 1) {
+                    prevLi.querySelector('a').addEventListener('click', (e) => {
+                        e.preventDefault();
+                        displaySimilarResultsPage(currentPage - 1, searchTerm);
+                    });
+                }
+                similarResultsPagination.appendChild(prevLi);
+                
+                // Page numbers
+                const maxVisiblePages = 5;
+                let startPage = Math.max(1, currentPage - Math.floor(maxVisiblePages / 2));
+                let endPage = Math.min(totalPages, startPage + maxVisiblePages - 1);
+                
+                // Adjust if we're near the end
+                if (endPage - startPage + 1 < maxVisiblePages) {
+                    startPage = Math.max(1, endPage - maxVisiblePages + 1);
+                }
+                
+                // First page if not visible
+                if (startPage > 1) {
+                    const firstLi = document.createElement('li');
+                    firstLi.className = 'page-item';
+                    firstLi.innerHTML = `<a class="page-link" href="#">1</a>`;
+                    firstLi.querySelector('a').addEventListener('click', (e) => {
+                        e.preventDefault();
+                        displaySimilarResultsPage(1, searchTerm);
+                    });
+                    similarResultsPagination.appendChild(firstLi);
+                    
+                    // Ellipsis if needed
+                    if (startPage > 2) {
+                        const ellipsisLi = document.createElement('li');
+                        ellipsisLi.className = 'page-item disabled';
+                        ellipsisLi.innerHTML = `<a class="page-link" href="#">...</a>`;
+                        similarResultsPagination.appendChild(ellipsisLi);
+                    }
+                }
+                
+                // Page numbers
+                for (let i = startPage; i <= endPage; i++) {
+                    const pageLi = document.createElement('li');
+                    pageLi.className = `page-item ${i === currentPage ? 'active' : ''}`;
+                    pageLi.innerHTML = `<a class="page-link" href="#">${i}</a>`;
+                    pageLi.querySelector('a').addEventListener('click', (e) => {
+                        e.preventDefault();
+                        displaySimilarResultsPage(i, searchTerm);
+                    });
+                    similarResultsPagination.appendChild(pageLi);
+                }
+                
+                // Last page if not visible
+                if (endPage < totalPages) {
+                    // Ellipsis if needed
+                    if (endPage < totalPages - 1) {
+                        const ellipsisLi = document.createElement('li');
+                        ellipsisLi.className = 'page-item disabled';
+                        ellipsisLi.innerHTML = `<a class="page-link" href="#">...</a>`;
+                        similarResultsPagination.appendChild(ellipsisLi);
+                    }
+                    
+                    const lastLi = document.createElement('li');
+                    lastLi.className = 'page-item';
+                    lastLi.innerHTML = `<a class="page-link" href="#">${totalPages}</a>`;
+                    lastLi.querySelector('a').addEventListener('click', (e) => {
+                        e.preventDefault();
+                        displaySimilarResultsPage(totalPages, searchTerm);
+                    });
+                    similarResultsPagination.appendChild(lastLi);
+                }
+                
+                // Next button
+                const nextLi = document.createElement('li');
+                nextLi.className = `page-item ${currentPage === totalPages ? 'disabled' : ''}`;
+                nextLi.innerHTML = `<a class="page-link" href="#" aria-label="Next"><span aria-hidden="true">&raquo;</span></a>`;
+                if (currentPage < totalPages) {
+                    nextLi.querySelector('a').addEventListener('click', (e) => {
+                        e.preventDefault();
+                        displaySimilarResultsPage(currentPage + 1, searchTerm);
+                    });
+                }
+                similarResultsPagination.appendChild(nextLi);
+            }
+            
+            // Highlight matching characters in text
+            function highlightMatches(text, searchTerm) {
+                if (!searchTerm || searchTerm.trim() === '') return text;
+                
+                const searchTermLower = searchTerm.toLowerCase();
+                let result = '';
+                let lastIndex = 0;
+                
+                // Find all occurrences of the search term in the text
+                const textLower = text.toLowerCase();
+                let index = textLower.indexOf(searchTermLower);
+                
+                while (index !== -1) {
+                    // Add the text before the match
+                    result += text.substring(lastIndex, index);
+                    
+                    // Add the highlighted match
+                    result += '<strong>' + text.substring(index, index + searchTerm.length) + '</strong>';
+                    
+                    // Update lastIndex and find the next occurrence
+                    lastIndex = index + searchTerm.length;
+                    index = textLower.indexOf(searchTermLower, lastIndex);
+                }
+                
+                // Add any remaining text
+                result += text.substring(lastIndex);
+                
+                return result;
+            }
+            
+            // Populate the existing form with WorkItem data
+            function populateFormWithWorkItem(item) {
+                // Update search input with selected name
+                searchInput.value = item.name;
+                
+                // Hide error message if it was shown
+                searchError.style.display = 'none';
+                
+                // Populate the existing Thymeleaf form fields
+                document.getElementById('workItemId').value = item.id;
+                document.getElementById('name').value = item.name;
+                document.getElementById('email').value = item.email;
+                document.getElementById('version').value = item.version;
+                document.getElementById('desc').value = item.desc;
+                document.getElementById('owner').value = item.owner;
+                
+                // If you have other fields, populate them here
+                
+                // Optional: Trigger change events if you have any listeners on these fields
+                triggerChangeEvent(document.getElementById('name'));
+                triggerChangeEvent(document.getElementById('email'));
+                triggerChangeEvent(document.getElementById('version'));
+                triggerChangeEvent(document.getElementById('desc'));
+                triggerChangeEvent(document.getElementById('owner'));
+            }
+            
+            // Helper function to trigger change events
+            function triggerChangeEvent(element) {
+                const event = new Event('change', { bubbles: true });
+                element.dispatchEvent(event);
+            }
+        });
+    </script>
+</body>
+</html>
