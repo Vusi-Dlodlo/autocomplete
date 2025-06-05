@@ -1,3 +1,25 @@
+        <!-- Search section without card -->
+        <div class="search-section">
+            <label for="workItemSearch" class="search-label">Search for WorkItem</label>
+            <div class="input-group mb-2">
+                <div class="autocomplete-container flex-grow-1">
+                    <div class="search-input-container">
+                        <input type="text" id="workItemSearch" class="form-control" placeholder="Search for a WorkItem by name...">
+                        <div class="search-spinner">
+                            <div class="spinner-border spinner-border-sm text-primary" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="search-error" id="searchError">Please enter a search term</div>
+                    <div class="autocomplete-results list-group shadow-sm" id="autocompleteResults"></div>
+                </div>
+                <button class="btn btn-outline-secondary" type="button" id="findSimilarBtn">
+                    <i class="bi bi-search"></i> Search
+                </button>
+            </div>
+        </div>
+
 /*******************************************************
  * VERSION 1: INITIAL WORKITEM SEARCH WITH AUTOCOMPLETE
  *******************************************************/
